@@ -1,0 +1,4 @@
+# The core package uses only the Python standard library.
+# Install optional extras from pyproject.toml for configuration files, tests,
+# OCR, or a model-backed TTS adapter.
+PyYAML>=6.0

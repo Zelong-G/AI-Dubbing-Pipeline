@@ -1,0 +1,6 @@
+translation:
+  backend: mock
+tts:
+  backend: mock
+timing:
+  max_tts_speed: 1.25

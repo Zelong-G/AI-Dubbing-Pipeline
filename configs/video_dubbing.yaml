@@ -1,0 +1,11 @@
+translation:
+  backend: mock
+grouping:
+  max_cues: 3
+  max_seconds: 5.0
+timing:
+  max_tts_speed: 1.25
+  soft_min_video_speed: 0.80
+  hard_min_video_speed: 0.40
+audio_mix:
+  original_volume: 0.18

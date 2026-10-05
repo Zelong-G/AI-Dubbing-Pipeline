@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If this repository informs your work, please cite it as below."
+title: "AI-Dubbing-Pipeline"
+version: "0.1.0"
+type: software
+authors:
+  - family-names: Zheng
+    given-names: Zelong
+    affiliation: Technical University of Munich

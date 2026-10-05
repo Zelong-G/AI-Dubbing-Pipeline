@@ -1,0 +1,8 @@
+translation:
+  backend: mock
+  batch_items: 12
+  context_size: 2
+tts:
+  backend: mock
+export:
+  lrc: true
