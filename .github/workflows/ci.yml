@@ -1,8 +1,13 @@
-name: ci
+name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -10,11 +15,49 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.10", "3.12"]
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: python -m pip install --upgrade pip pytest
-      - run: pytest -q
-      - run: python -m compileall ai_dubbing scripts
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check ai_dubbing scripts tests
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Compile
+        run: python -m compileall -q ai_dubbing scripts
+
+      - name: Offline translation demo
+        run: |
+          python scripts/translate_srt.py \
+            --input examples/sample_zh.srt \
+            --translator mock \
+            --output outputs/sample_en.srt
+
+      - name: Offline dubbing-plan demo
+        run: |
+          python scripts/dub_video.py \
+            --input dummy/example.mp4 \
+            --srt examples/sample_zh.srt \
+            --dry-run
+
+      - name: Offline audiobook demo
+        run: |
+          python scripts/build_audiobook.py \
+            --input examples/sample_chapter.txt \
+            --output-dir outputs/audiobook \
+            --translator mock \
+            --tts mock

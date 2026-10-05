@@ -6,24 +6,29 @@ import wave
 from pathlib import Path
 
 from ai_dubbing.common.models import TTSResult
-from ai_dubbing.common.text import english_words
+from ai_dubbing.tts.duration import HeuristicDurationEstimator
 
 
 class MockTTSBackend:
-    """Writes a quiet tone whose duration follows a transparent speech heuristic."""
+    """Write a quiet tone whose duration follows a transparent heuristic."""
 
     name = "mock"
 
-    def __init__(self, *, words_per_second: float = 2.5, sample_rate: int = 16_000) -> None:
-        self.words_per_second = words_per_second
+    def __init__(
+        self,
+        *,
+        words_per_second: float = 2.5,
+        sample_rate: int = 16_000,
+    ) -> None:
+        if sample_rate <= 0:
+            raise ValueError("sample_rate must be positive.")
+        self.estimator = HeuristicDurationEstimator(
+            words_per_second=words_per_second
+        )
         self.sample_rate = sample_rate
 
     def estimate_duration(self, text: str, *, speed: float = 1.0) -> float:
-        if speed <= 0:
-            raise ValueError("Speed must be positive.")
-        words = max(1, len(english_words(text)))
-        punctuation_pause = 0.10 * sum(text.count(mark) for mark in ".,!?;")
-        return max(0.20, (words / self.words_per_second + punctuation_pause) / speed)
+        return self.estimator.estimate_duration(text, speed=speed)
 
     def synthesize(
         self,
@@ -35,7 +40,7 @@ class MockTTSBackend:
         speed: float = 1.0,
     ) -> TTSResult:
         del reference_audio, speaker
-        duration = self.estimate_duration(text, speed=speed)
+        duration = self.estimator.estimate_duration(text, speed=speed)
         sample_count = max(1, round(duration * self.sample_rate))
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with wave.open(str(output_path), "wb") as output:
@@ -44,7 +49,13 @@ class MockTTSBackend:
             output.setframerate(self.sample_rate)
             frames = bytearray()
             for sample in range(sample_count):
-                amplitude = int(350 * math.sin(2 * math.pi * 220 * sample / self.sample_rate))
-                frames.extend(amplitude.to_bytes(2, byteorder="little", signed=True))
+                amplitude = int(
+                    350 * math.sin(2 * math.pi * 220 * sample / self.sample_rate)
+                )
+                frames.extend(
+                    amplitude.to_bytes(2, byteorder="little", signed=True)
+                )
             output.writeframes(bytes(frames))
-        return TTSResult(str(output_path), duration, self.sample_rate, self.name)
+        return TTSResult(
+            str(output_path), duration, self.sample_rate, self.name
+        )

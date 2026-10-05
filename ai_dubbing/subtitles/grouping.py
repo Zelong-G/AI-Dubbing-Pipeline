@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import pairwise
 
 from ai_dubbing.common.models import Cue
 
@@ -19,18 +20,21 @@ class CueGroup:
         return self.end - self.start
 
 
-def conservative_join_decisions(cues: list[Cue], *, max_gap: float = 0.18) -> dict[int, bool]:
-    """Join only clear continuations; uncertain boundaries remain separate.
-
-    A model-based boundary classifier can provide this same mapping in a richer
-    deployment. The default keeps an auditable deterministic policy.
-    """
+def conservative_join_decisions(
+    cues: list[Cue],
+    *,
+    max_gap: float = 0.18,
+) -> dict[int, bool]:
+    """Join only clear continuations; uncertain boundaries remain separate."""
     decisions: dict[int, bool] = {}
     terminal = ("。", "！", "？", "!", "?", ".")
     continuation = ("，", "、", ",", ":", "：", "-", "…")
-    for left, right in zip(cues, cues[1:]):
+    for left, right in pairwise(cues):
         gap = max(0.0, right.start - left.end)
-        decisions[left.index] = gap <= max_gap and left.text.rstrip().endswith(continuation)
+        decisions[left.index] = (
+            gap <= max_gap
+            and left.text.rstrip().endswith(continuation)
+        )
         if left.text.rstrip().endswith(terminal):
             decisions[left.index] = False
     return decisions
@@ -47,10 +51,14 @@ def build_groups(
         return []
     groups: list[list[Cue]] = []
     current = [cues[0]]
-    for left, right in zip(cues, cues[1:]):
+    for left, right in pairwise(cues):
         proposed_seconds = right.end - current[0].start
         may_join = joins.get(left.index, False)
-        if may_join and len(current) < max_cues and proposed_seconds <= max_seconds:
+        if (
+            may_join
+            and len(current) < max_cues
+            and proposed_seconds <= max_seconds
+        ):
             current.append(right)
         else:
             groups.append(current)

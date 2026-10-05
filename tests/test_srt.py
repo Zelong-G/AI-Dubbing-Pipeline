@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from ai_dubbing.subtitles.srt import format_timestamp, parse_srt, parse_timestamp, write_srt
+from ai_dubbing.subtitles.srt import (
+    format_timestamp,
+    parse_srt,
+    parse_timestamp,
+    write_srt,
+)
 
 
 def test_srt_round_trip(tmp_path: Path) -> None:
@@ -11,9 +16,15 @@ def test_srt_round_trip(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     cues = parse_srt(source)
-    assert [(cue.index, cue.text) for cue in cues] == [(1, "Hello there"), (2, "Second line")]
+    assert [(cue.index, cue.text) for cue in cues] == [
+        (1, "Hello there"),
+        (2, "Second line"),
+    ]
     assert parse_timestamp("00:00:02,500") == 2.5
     assert format_timestamp(2.5) == "00:00:02,500"
     target = tmp_path / "roundtrip.srt"
     write_srt(cues, target)
-    assert [cue.text for cue in parse_srt(target)] == ["Hello there", "Second line"]
+    assert [cue.text for cue in parse_srt(target)] == [
+        "Hello there",
+        "Second line",
+    ]

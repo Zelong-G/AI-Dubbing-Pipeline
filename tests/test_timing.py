@@ -1,8 +1,12 @@
 import pytest
 
-from ai_dubbing.common.models import Cue, SlowRegion
+from ai_dubbing.common.models import Cue
 from ai_dubbing.subtitles.alignment import map_timestamp, remap_cues
-from ai_dubbing.video.timing import FitPolicy, build_slow_regions, fit_utterance_duration
+from ai_dubbing.video.timing import (
+    FitPolicy,
+    build_slow_regions,
+    fit_utterance_duration,
+)
 
 
 def test_duration_fit_prefers_local_slowdown_before_acceleration() -> None:

@@ -19,7 +19,11 @@ class TranslationRecord:
     cached: bool = False
 
 
-def make_batches(cues: list[Cue], max_items: int, max_characters: int) -> list[list[Cue]]:
+def make_batches(
+    cues: list[Cue],
+    max_items: int,
+    max_characters: int,
+) -> list[list[Cue]]:
     if max_items < 1 or max_characters < 1:
         raise ValueError("Batch limits must be positive.")
     batches: list[list[Cue]] = []
@@ -27,7 +31,10 @@ def make_batches(cues: list[Cue], max_items: int, max_characters: int) -> list[l
     characters = 0
     for cue in cues:
         size = len(cue.text)
-        if current and (len(current) >= max_items or characters + size > max_characters):
+        if current and (
+            len(current) >= max_items
+            or characters + size > max_characters
+        ):
             batches.append(current)
             current, characters = [], 0
         current.append(cue)
@@ -38,7 +45,7 @@ def make_batches(cues: list[Cue], max_items: int, max_characters: int) -> list[l
 
 
 class TranslationService:
-    """Translate independently addressable units and persist valid progress."""
+    """Translate addressable units and persist only QA-valid progress."""
 
     schema_version = 1
 
@@ -50,18 +57,32 @@ class TranslationService:
         batch_characters: int = 2_400,
         context_size: int = 2,
     ) -> None:
+        if context_size < 0:
+            raise ValueError("context_size cannot be negative.")
         self.backend = backend
         self.batch_items = batch_items
         self.batch_characters = batch_characters
         self.context_size = context_size
 
     def translate(
-        self, cues: list[Cue], *, cache_path: Path | None = None
+        self,
+        cues: list[Cue],
+        *,
+        cache_path: Path | None = None,
     ) -> list[TranslationRecord]:
-        fingerprint = content_digest("\n".join(f"{c.index}:{c.text}" for c in cues))
+        positions: dict[int, int] = {}
+        for position, cue in enumerate(cues):
+            if cue.index in positions:
+                raise ValueError("Cue indices must be unique.")
+            positions[cue.index] = position
+
+        fingerprint = content_digest(
+            "\n".join(f"{cue.index}:{cue.text}" for cue in cues)
+        )
         cached = self._load_cache(cache_path, fingerprint)
         records: dict[int, TranslationRecord] = {}
         by_index = {cue.index: cue for cue in cues}
+
         for index, value in cached.items():
             cue = by_index.get(index)
             if cue is None:
@@ -69,24 +90,46 @@ class TranslationService:
             normalized = normalize_translation(value)
             qa = inspect_translation(cue, normalized)
             if qa.ok:
-                records[index] = TranslationRecord(cue, normalized, qa, cached=True)
+                records[index] = TranslationRecord(
+                    cue,
+                    normalized,
+                    qa,
+                    cached=True,
+                )
 
-        for batch in make_batches(cues, self.batch_items, self.batch_characters):
-            pending = [cue for cue in batch if cue.index not in records]
+        for batch in make_batches(
+            cues,
+            self.batch_items,
+            self.batch_characters,
+        ):
+            pending = [
+                cue for cue in batch if cue.index not in records
+            ]
             if not pending:
                 continue
-            start = cues.index(pending[0])
+
+            start = positions[pending[0].index]
             context = cues[max(0, start - self.context_size) : start]
             responses = self.backend.translate(pending, context=context)
             for cue in pending:
-                english = normalize_translation(responses.get(cue.index, ""))
+                english = normalize_translation(
+                    responses.get(cue.index, "")
+                )
                 qa = inspect_translation(cue, english)
-                records[cue.index] = TranslationRecord(cue, english, qa)
+                records[cue.index] = TranslationRecord(
+                    cue,
+                    english,
+                    qa,
+                )
             self._save_cache(cache_path, fingerprint, records)
 
         return [records[cue.index] for cue in cues]
 
-    def _load_cache(self, path: Path | None, fingerprint: str) -> dict[int, str]:
+    def _load_cache(
+        self,
+        path: Path | None,
+        fingerprint: str,
+    ) -> dict[int, str]:
         if path is None:
             return {}
         payload = read_json(path, {})
@@ -97,7 +140,11 @@ class TranslationService:
         ):
             return {}
         rows = payload.get("translations", {})
-        return {int(key): str(value) for key, value in rows.items() if str(key).isdigit()}
+        return {
+            int(key): str(value)
+            for key, value in rows.items()
+            if str(key).isdigit()
+        }
 
     def _save_cache(
         self,

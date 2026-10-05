@@ -1,65 +1,106 @@
 # AI-Dubbing-Pipeline
 
-**A modular pipeline for long-form audiobook generation and temporally aligned video dubbing.**
+**A modular research pipeline for translation, speech synthesis, and temporal alignment.**
 
-AI-Dubbing-Pipeline is a research-oriented Python framework for converting multilingual text and subtitle-driven local video into English speech while preserving speaker structure, timing constraints, and audiovisual alignment. It is designed as an engineering portfolio: every core stage has a narrow interface, deterministic offline path, and lightweight tests.
+[![CI](https://github.com/Zelong-G/AI-Dubbing-Pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/Zelong-G/AI-Dubbing-Pipeline/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
 
-The two workflows are:
+AI-Dubbing-Pipeline is a compact Python research/engineering framework for two related workflows:
 
-1. Long-form text → translated multi-speaker audiobook segments with LRC timing.
-2. Local video + subtitles → translated, temporally aligned English dubbing plan.
+1. **Long-form text → translated audiobook segments + LRC timing**
+2. **Local video + subtitles → translated, temporally aligned dubbing plan**
 
-The video workflow operates only on local media supplied by the user. It does not include acquisition, scraping, or access-control bypass functionality.
+The project focuses on system problems around multimodal dubbing rather than a particular foundation model: restart-safe translation, structural QA, conservative subtitle grouping, speaker/voice labels when available, speech-duration mismatch, local video slowdown, timeline remapping, and reviewed media export.
 
-## Why the problem is interesting
+> **Scope.** Inputs are user-provided local text, subtitles, images, and media. This repository contains no copyrighted corpus, media acquisition logic, access-control bypass, model weights, reference voices, or private project assets.
 
-Text translation is only one part of a dubbed result. The system must maintain context across batches, detect structurally bad translations, preserve speaker labels, decide whether visually split subtitles form one utterance, handle TTS duration mismatch, and rebuild downstream timestamps after local video speed changes. This project isolates those decisions rather than hiding them in a single script.
+## Why this problem is interesting
+
+A translated sentence is not yet a usable dub. A practical system also has to decide whether translation jobs can resume safely, whether model output is structurally valid, whether visually split subtitles belong to one utterance, how to handle speech that exceeds the available time window, and how to keep subtitles synchronized after local video time warping.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A[Text or SRT] --> B[Segmentation]
+    A[Text or SRT] --> B[Segmentation / grouping]
     B --> C[Batch translation]
-    C --> D[QA and normalization]
-    D --> E[Speaker and voice assignment]
-    E --> F[TTS backend]
+    C --> D[QA + restart-safe cache]
+    D --> E[Voice labels when available]
+    E --> F[Speech backend or duration estimator]
     F --> G[Duration fitting]
-    G --> H[Timeline alignment]
-    H --> I[Audio or video export]
+    G --> H[Source-to-output timeline]
+    H --> I[Subtitles / audio / video export]
 ```
 
-### Audiobook pipeline
+### Audiobook path
 
 ```mermaid
 flowchart LR
     A[Plain text] --> B[Chapter parser]
     B --> C[Sentence units]
-    C --> D[Translation service]
-    D --> E[Voice labels]
-    E --> F[TTS segments]
-    F --> G[LRC timing and optional FFmpeg assembly]
+    C --> D[TranslationService]
+    D --> E[TTSBackend]
+    E --> F[Measured segment durations]
+    F --> G[LRC timing]
 ```
 
-### Video dubbing pipeline
+### Video planning path
 
 ```mermaid
 flowchart LR
-    A[Local video and SRT] --> B[SRT cleanup]
+    A[Local video + SRT] --> B[SRT cleanup]
     B --> C[Conservative cue grouping]
-    C --> D[Translation QA]
-    D --> E[Voice-aware TTS]
-    E --> F[Duration fitting]
-    F --> G[Local slow regions]
-    G --> H[Subtitle remapping]
-    H --> I[FFmpeg audio mix and mux]
+    C --> D[Translation + QA]
+    D --> E[Speech-duration estimate]
+    E --> F[Fit policy]
+    F --> G[Local SlowRegions]
+    G --> H[Shared timeline remapping]
+    H --> I[Prepared audio + FFmpeg mux]
 ```
 
-## Quick start: no model, GPU, or network required
+## Technical highlights
+
+### Restart-safe translation
+
+`TranslationService` batches cues by item and character limits, supplies bounded previous context, validates unique cue IDs, performs deterministic structural QA, and atomically caches only QA-valid rows. The cache stores both the backend name and an input fingerprint so stale translations are not silently reused.
+
+### Model-independent speech boundary
+
+The audiobook workflow uses a narrow `TTSBackend` protocol. `MockTTSBackend` writes deterministic tone-based WAV files so orchestration can be tested without a GPU or model download.
+
+External synthesis systems can be connected through `CallableTTSAdapter`. Model loading, checkpoints, devices, reference-audio policy, and model-specific licensing remain outside this repository.
+
+Video timing planning is separately typed against `SpeechDurationEstimator`. The included `HeuristicDurationEstimator` is transparent and offline; deployments can replace it with measured durations or a learned estimator.
+
+### Temporal fitting policy
+
+For each utterance the planner:
+
+1. uses the original cue interval plus safe silence before the next cue;
+2. keeps the base speech rate when possible;
+3. allows bounded local video slowdown;
+4. increases TTS speed only if the soft slowdown limit would otherwise be exceeded;
+5. emits an explicit warning if the hard fitting limit still cannot be met.
+
+The resulting `SlowRegion` objects define one source-to-output time map. The same mapping is reused for subtitle remapping so audio/video and subtitle timing do not drift independently.
+
+## Quick start — no GPU, model, media, or network required
 
 ```bash
-python -m pip install -e '.[dev]'
+git clone https://github.com/Zelong-G/AI-Dubbing-Pipeline.git
+cd AI-Dubbing-Pipeline
+
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+```
+
+Run the public verification path:
+
+```bash
 pytest -q
+python -m compileall ai_dubbing scripts
 
 python scripts/translate_srt.py \
   --input examples/sample_zh.srt \
@@ -69,7 +110,6 @@ python scripts/translate_srt.py \
 python scripts/dub_video.py \
   --input dummy/example.mp4 \
   --srt examples/sample_zh.srt \
-  --tts mock \
   --dry-run
 
 python scripts/build_audiobook.py \
@@ -79,57 +119,81 @@ python scripts/build_audiobook.py \
   --tts mock
 ```
 
-The mock translator supplies deterministic English for the original synthetic examples. The mock TTS backend writes small tone-based WAV segments whose durations follow an explicit word-rate heuristic. It exists for testing the orchestration, not to represent speech quality.
+The dry-run video command deliberately does not open the dummy video path. It exercises SRT parsing, grouping, translation, QA, voice-label assignment, duration estimation, fitting, and timeline construction.
 
-## Core design choices
+The current suite contains **9 offline unit tests**. GitHub Actions also installs the package, runs lint/compile checks, and executes all three public demos on Python 3.10 and 3.12.
 
-- `TranslationService` batches independent cues, supplies bounded context, checks response structure, and atomically saves valid progress after each batch. A changed input fingerprint invalidates stale progress.
-- `TTSBackend` lets both workflows use the same synthesis contract. The core repository ships an offline mock. XTTS and Chatterbox are intentionally lazy integration boundaries, not bundled models.
-- Subtitle grouping is deliberately conservative. A model-based boundary classifier can provide join decisions later; uncertain boundaries stay split.
-- `fit_utterance_duration` first keeps base speech speed, then permits mild local slowdown, then raises TTS speed within a cap. If the hard limit is still exceeded, the plan records a warning for review rather than implying a perfect fit.
-- `map_timestamp` and `remap_cues` use the same slowdown regions as the video planner, avoiding independent, drifting subtitle timing logic.
+## Public interfaces
+
+| Interface | Purpose |
+| --- | --- |
+| `TranslationBackend` | Provider-neutral translation |
+| `TranslationService` | Batching, context, QA, cache/restart |
+| `TTSBackend` | Speech synthesis contract |
+| `CallableTTSAdapter` | Wrap externally managed synthesis code |
+| `SpeechDurationEstimator` | Decouple video planning from a TTS model |
+| `SubtitleOCR` | Optional OCR contract for local frame images |
+| `FitPolicy` | Explicit duration-fitting constraints |
+| `map_timestamp` | Shared source-to-output timeline mapping |
 
 ## Optional components
 
-| Component | Needed for | Requirement |
-| --- | --- | --- |
-| Mock translator and TTS | Tests and demos | Nothing beyond Python 3.10 |
-| YAML config reader | Loading `configs/*.yaml` | `pip install -e '.[config]'` |
-| HTTP translation adapter | A deployed compatible service | Endpoint configuration; examples never call it |
-| RapidOCR adapter | OCR from local frames | `pip install -e '.[ocr]'` |
-| XTTS / Chatterbox adapters | Model-backed synthesis | Corresponding optional extra and model setup; GPU may be beneficial |
-| FFmpeg | Segment assembly, mix, mux, or subtitle burn-in | A local FFmpeg installation on `PATH` |
-
-Speaker embeddings and clustering are extension points and **experimental**. They are not presented as speaker-recognition results or accuracy claims.
+| Component | Status |
+| --- | --- |
+| YAML configuration | Optional via `.[config]` |
+| RapidOCR | Optional local-frame integration via `.[ocr]` |
+| External TTS models | Connect through `TTSBackend` / `CallableTTSAdapter`; no model-specific wrapper is claimed |
+| Speaker embeddings/clustering | Experimental extension interfaces only |
+| FFmpeg | Required only for real local-media assembly/mixing/muxing |
 
 ## Repository layout
 
 ```text
 ai_dubbing/
-  audiobook/       chapter parsing, segment orchestration, LRC export
-  common/          models, configuration, text and restart-safe IO
-  speakers/        experimental embedding and clustering interfaces
-  subtitles/       SRT, cleanup, grouping, OCR interface, alignment
-  translation/     backend contract, prompts, normalization, QA, batching
-  tts/             backend contract, offline mock, optional adapters, voices
-  video/           duration fitting, timeline plan, FFmpeg mix and mux
-configs/           conservative defaults
+  audiobook/       chapter parsing, synthesis orchestration, LRC export
+  common/          serializable models, configuration, text and atomic IO
+  speakers/        experimental embedding/clustering interfaces
+  subtitles/       SRT, cleanup, grouping, OCR contract, alignment
+  translation/     backend contract, prompts, QA, normalization, batching/cache
+  tts/             TTS contract, generic adapter, mock backend, duration estimate
+  video/           duration fitting, timeline plan, FFmpeg command/export helpers
+configs/           conservative reference defaults
 examples/          original synthetic text and subtitles
-scripts/           directly runnable entry points
-tests/             lightweight offline checks
+scripts/           runnable public entry points
+tests/             lightweight offline tests
+docs/              architecture and workflow notes
 ```
 
-See [the architecture notes](docs/ARCHITECTURE.md), [audiobook workflow](docs/AUDIOBOOK_PIPELINE.md), and [video workflow](docs/VIDEO_DUBBING_PIPELINE.md) for stage-level detail.
+See [Architecture](docs/ARCHITECTURE.md), [Audiobook workflow](docs/AUDIOBOOK_PIPELINE.md), and [Video dubbing workflow](docs/VIDEO_DUBBING_PIPELINE.md).
 
-## Scope and limitations
+## Limitations
 
-- Inputs are user-provided text, subtitles, images, and local media; the repository includes no source media, subtitle corpus, reference audio, or generated results.
-- Translation QA is structural and deterministic by default. Semantic review is a deployment-specific extension, not a claim of translation correctness.
-- The supplied FFmpeg helpers build and run commands only for existing local files. Review generated media and subtitles before release.
-- This is a research and engineering prototype, not a production service.
+- Structural translation QA catches malformed or obviously unusable output; it is not a semantic quality metric.
+- The public text parser does not automatically identify novel characters or dialogue speakers.
+- Speaker embedding/clustering is an experimental interface, not a published recognition result.
+- The repository does not ship model-specific TTS weights or a ready-to-run XTTS/Chatterbox wrapper.
+- Real dubbing still requires reviewed local media, a chosen synthesis implementation, and FFmpeg for final assembly.
+- This is a research/engineering prototype, not a production service.
+
+## Third-party software
+
+No third-party source, model weights, datasets, or media assets are vendored. See [THIRD_PARTY.md](THIRD_PARTY.md).
+
+## Citation
+
+If the software is useful in academic work, citation metadata is provided in [CITATION.cff](CITATION.cff).
+
+## Author
+
+**Zelong Zheng**  
+Technical University of Munich (TUM)
+
+Research interests: multimodal AI, computer vision, autonomous driving, and research engineering.
+
+GitHub: [Zelong-G](https://github.com/Zelong-G)
 
 ## License and reuse
 
 No open-source license is granted for this repository at this time. The source is publicly visible for academic inspection, research discussion, and portfolio evaluation.
 
-Third-party dependencies remain subject to their respective licenses.
+Third-party dependencies remain governed by their respective licenses.

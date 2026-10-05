@@ -5,7 +5,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-
 _CHAPTER = re.compile(
     r"(?im)^\s*(?:chapter\s+\d+\b.*|第\s*[0-9一二三四五六七八九十百千万两〇零]+\s*[章节回卷篇].*)$"
 )

@@ -1,16 +1,16 @@
 # Third-party components
 
-The repository contains no vendored third-party source code, model weights, or
-media assets. The core test suite uses only the Python standard library.
+This repository vendors no third-party source code, model weights, datasets, reference audio, or media assets. The core test suite and offline planning demos use only the Python standard library.
 
-Optional integrations may use the following independently installed projects:
+Optional integrations may use independently installed software:
 
-- FFmpeg for audio mixing, subtitle rendering, and video export.
-- PyTorch and a compatible speech stack for model-backed synthesis.
-- RapidOCR for local subtitle detection.
-- XTTS or Chatterbox for optional TTS adapters.
+| Component | Purpose | Bundled? |
+| --- | --- | --- |
+| FFmpeg | Local audio mixing, muxing, and media export | No |
+| RapidOCR | Optional subtitle OCR from user-provided local frames | No |
+| PyTorch / speech frameworks | Model-specific TTS implementations connected through the TTSBackend contract | No |
+| XTTS, Chatterbox, or other TTS models | Examples of externally managed synthesis backends | No |
 
-These components are not bundled. Before using an integration, review the
-license, model terms, and version-specific requirements published by its
-upstream provider. Users are responsible for ensuring they have rights to
-their local media, reference audio, and generated outputs.
+The repository provides a generic CallableTTSAdapter; it does **not** claim to ship a ready-to-run wrapper for any particular model family. Model loading, weights, device placement, reference-audio policy, and model-specific licenses remain deployment-owned.
+
+Before using an optional integration, verify the license and model terms for the exact version installed. Users are responsible for ensuring they have rights to their local media, text, reference audio, and generated outputs.
